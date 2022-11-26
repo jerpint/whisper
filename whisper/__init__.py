@@ -7,6 +7,7 @@ from typing import List, Optional, Union
 
 import torch
 from tqdm import tqdm
+from huggingface_hub import hf_hub_download
 
 from .audio import load_audio, log_mel_spectrogram, pad_or_trim
 from .decoding import DecodingOptions, DecodingResult, decode, detect_language
@@ -91,7 +92,7 @@ def load_model(name: str, device: Optional[Union[str, torch.device]] = None, dow
         device = "cuda" if torch.cuda.is_available() else "cpu"
     if download_root is None:
         download_root = os.getenv(
-            "XDG_CACHE_HOME", 
+            "XDG_CACHE_HOME",
             os.path.join(os.path.expanduser("~"), ".cache", "whisper")
         )
 
@@ -105,6 +106,43 @@ def load_model(name: str, device: Optional[Union[str, torch.device]] = None, dow
     with (io.BytesIO(checkpoint_file) if in_memory else open(checkpoint_file, "rb")) as fp:
         checkpoint = torch.load(fp, map_location=device)
     del checkpoint_file
+
+    dims = ModelDimensions(**checkpoint["dims"])
+    model = Whisper(dims)
+    model.load_state_dict(checkpoint["model_state_dict"])
+
+    return model.to(device)
+
+
+def load_hf_model(repo_id: str, filename: str, device: Optional[Union[str, torch.device]] = None) -> Whisper:
+    """
+    Load a Whisper ASR model hosted on the huggingface Hub.
+
+    Parameters
+    ----------
+    repo_id : str
+        Name of the repo_id on huggingface hub, e.g. jerpint/whisper
+    filename : str
+        name of the file to download from the huggingface hug, e.g. base.pt
+    device : Union[str, torch.device]
+        the PyTorch device to put the model into
+
+    Returns
+    -------
+    model : Whisper
+        The Whisper ASR model instance
+    """
+
+    # Set appropriate device
+    if device is None:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    # Download the file from the huggingface hub
+    checkpoint_file = hf_hub_download(repo_id=repo_id, filename=filename)
+
+    # Load the model into memory
+    with (open(checkpoint_file, "rb")) as fp:
+        checkpoint = torch.load(fp, map_location=device)
 
     dims = ModelDimensions(**checkpoint["dims"])
     model = Whisper(dims)
